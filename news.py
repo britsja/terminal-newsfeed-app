@@ -3,7 +3,9 @@ import feedparser
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
-from rich.live import Live
+import subprocess
+import threading
+import select, sys, termios, tty
 
 console = Console()
 
@@ -40,12 +42,15 @@ def fetch_headlines():
 def create_dashboard(headlines, next_refresh):
   table = Table(
     title=f"Latest News | Next Refresh: {next_refresh}",
-    show_lines=True,
+    show_lines=False,
+    box=None,
+    padding=(0,1),
+    expand=True,
   )
 
-  table.add_column("Source", style="cyan")
-  table.add_column("Headline", style="white")
-  table.add_column("Status", style="green")
+  table.add_column("Source", style="cyan", width=15, no_wrap=True)
+  table.add_column("Headline", style="white", overflow="ellipsis", no_wrap=True)
+  table.add_column("Status", style="green", width=4)
 
   for item in headlines:
     table.add_row(
@@ -55,15 +60,27 @@ def create_dashboard(headlines, next_refresh):
     )
   return table
 
+def read_headlines(headlines):
+  def speak():
+    for item in headlines:
+      text = f"{item['source']}. {item['title']}"
+      subprocess.run(["say", "-r", "190", text])
+  threading.Thread(target=speak, daemon=True).start()
+
 def main():
   console.print("[bold green]Starting News Dashboard...[/]")
 
-  while True:
-    try:
-      headlines = fetch_headlines()
+  old_settings = termios.tcgetattr(sys.stdin)
 
+  try:
+    tty.setcbreak(sys.stdin.fileno())
+
+    headlines = fetch_headlines()
+    next_update = time.monotonic() + REFRESH_INTERVAL
+
+    while True:
       next_refresh = datetime.fromtimestamp(
-        time.time() + REFRESH_INTERVAL
+        time.time() + max(0, next_update - time.monotonic())
       ).strftime("%H:%M:%S")
 
       console.clear()
@@ -71,15 +88,34 @@ def main():
         create_dashboard(headlines, next_refresh)
       )
 
-      time.sleep(REFRESH_INTERVAL)
+      console.print(
+        "\n[green]R[/] = Read Headlines | "
+        "[yellow]Q[/] = Quit"
+      )
 
-    except KeyboardInterrupt:
-      console.print("\n[yellow]Dashboard stopped.[/]")
-      break
+      while time.monotonic() < next_update:
+        if select.select([sys.stdin], [], [], 1)[0]:
+          key = sys.stdin.read(1).lower()
 
-    except Exception as error:
-      console.print(f"[red]Error: {error}[/]")
-      time.sleep(60)
+          if key == "r":
+            read_headlines(headlines)
+
+          elif key == "q":
+            return
+
+      headlines = fetch_headlines()
+      next_update = time.monotonic() + REFRESH_INTERVAL
+
+  except KeyboardInterrupt:
+    pass
+
+  finally:
+    termios.tcsetattr(
+      sys.stdin,
+      termios.TCSADRAIN,
+      old_settings
+    )
+    console.print("\n[yellow]Dashboard stoppped.[/]")
 
 if __name__ == "__main__":
   main()
