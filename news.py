@@ -10,9 +10,15 @@ import select, sys, termios, tty
 console = Console()
 
 RSS_FEED = {
+  "Fox News": "https://moxie.foxnews.com/google-publisher/latest.xml",
+  "CNN": (
+      "https://news.google.com/rss/search?"
+      "q=when:24h+site:cnn.com"
+      "&hl=en-US&gl=US&ceid=US:en"
+  ),
+  "News24": "https://feeds.capi24.com/v1/Search/articles/news24/topstories/rss",
+  "Slashdot": "https://rss.slashdot.org/Slashdot/slashdotMain",
   "BBC World": "https://feeds.bbci.co.uk/news/world/rss.xml",
-  "BBC Technology": "https://feeds.bbci.co.uk/news/technology/rss.xml",
-  "Hacker News": "https://hnrss.org/frontpage",
 }
 
 REFRESH_INTERVAL = 30 * 60 #should be 30 minutes
@@ -24,6 +30,13 @@ def fetch_headlines():
 
   for source, url in RSS_FEED.items():
     feed = feedparser.parse(url)
+
+    if feed.bozo:
+      print(f"Warning: {source} - {feed.bozo_exception}")
+
+    if not feed.entries:
+      print(f"No headlines returned from {source}")
+      continue
 
     for entry in feed.entries[:10]:
       headline_id = entry.get("link", entry.title)
@@ -62,9 +75,16 @@ def create_dashboard(headlines, next_refresh):
 
 def read_headlines(headlines):
   def speak():
-    for item in headlines:
-      text = f"{item['source']}. {item['title']}"
-      subprocess.run(["say", "-r", "190", text])
+    current_news_source = ''
+    for item in headlines:    
+      if item['new']:  
+        new_source = item['source']
+        if new_source != current_news_source:
+          current_news_source = new_source
+          text = f"{current_news_source}. {item['title']}"
+        else:
+          text = f"{item['title']}"
+        subprocess.run(["say", "-r", "190", text])
   threading.Thread(target=speak, daemon=True).start()
 
 def main():
